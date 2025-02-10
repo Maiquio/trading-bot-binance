@@ -1,0 +1,95 @@
+import time
+import numpy as np
+from binance.client import Client
+from binance.enums import *
+import os
+
+# Configurações do bot
+API_KEY = os.getenv('BINANCE_API_KEY')
+API_SECRET = os.getenv('BINANCE_API_SECRET')
+SYMBOL = 'BTCUSDT'  # Par de trading
+LEVERAGE = 20  # Alavancagem máxima
+RISK_PER_TRADE = 0.25  # 25% do capital disponível
+
+# Inicializa cliente da Binance
+client = Client(API_KEY, API_SECRET)
+client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
+
+def get_balance():
+    balance_info = client.futures_account_balance()
+    for asset in balance_info:
+        if asset['asset'] == 'USDT':
+            return float(asset['balance'])
+    return 0
+
+def calculate_position_size():
+    balance = get_balance()
+    position_size = balance * RISK_PER_TRADE * LEVERAGE  # Ajustado para alavancagem
+    return position_size
+
+def get_market_data():
+    ticker = client.futures_symbol_ticker(symbol=SYMBOL)
+    return float(ticker['price'])
+
+def get_sentiment_data():
+    # Aqui deve entrar a consulta ao Long/Short Ratio, Open Interest, Funding Rate e Liquidation Heatmap
+    # Placeholder para futuro desenvolvimento
+    return {'long_short_ratio': 0.6, 'open_interest': 1000000, 'funding_rate': 0.01, 'liquidation_heatmap': []}
+
+def some_signal_to_buy():
+    sentiment = get_sentiment_data()
+    if sentiment['long_short_ratio'] < 0.4 and sentiment['funding_rate'] < 0.01:
+        return True
+    return False
+
+def some_signal_to_sell():
+    sentiment = get_sentiment_data()
+    if sentiment['long_short_ratio'] > 0.6 and sentiment['funding_rate'] > 0.02:
+        return True
+    return False
+
+def place_order(side, position_size):
+    order = client.futures_create_order(
+        symbol=SYMBOL,
+        side=side,
+        type=ORDER_TYPE_MARKET,
+        quantity=round(position_size, 3),
+        leverage=LEVERAGE
+    )
+    return order
+
+def place_stop_loss(entry_price, side):
+    stop_loss_pct = 0.015  # Stop de 1.5% para otimizar risco/recompensa
+    stop_loss_price = entry_price * (1 - stop_loss_pct) if side == SIDE_BUY else entry_price * (1 + stop_loss_pct)
+    stop_loss_price = round(stop_loss_price, 2)
+    
+    order = client.futures_create_order(
+        symbol=SYMBOL,
+        side=SIDE_SELL if side == SIDE_BUY else SIDE_BUY,
+        type=ORDER_TYPE_STOP_MARKET,
+        stopPrice=stop_loss_price,
+        quantity=round(calculate_position_size(), 3)
+    )
+    return order
+
+def trading_logic():
+    while True:
+        try:
+            price = get_market_data()
+            position_size = calculate_position_size()
+            
+            if some_signal_to_buy():
+                order = place_order(SIDE_BUY, position_size)
+                place_stop_loss(price, SIDE_BUY)
+            elif some_signal_to_sell():
+                order = place_order(SIDE_SELL, position_size)
+                place_stop_loss(price, SIDE_SELL)
+            
+            time.sleep(10)  # Espera 10 segundos entre verificações
+        except Exception as e:
+            print(f'Erro: {e}')
+
+# Configuração para rodar em VPS
+if __name__ == "__main__":
+    print("Iniciando bot de trading na VPS...")
+    trading_logic()
